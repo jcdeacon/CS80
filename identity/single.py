@@ -44,7 +44,7 @@ random_datum = True
 random_from_test = True
 
 # Configuring training
-n_epochs = 50
+n_epochs = 500000
 plot_every = 50
 print_every = 100
 
@@ -293,42 +293,41 @@ def train(input_variable, total_length, encoder, decoder, encoder_optimizer, dec
     decoder_optimizer.zero_grad()
     loss = 0 # Added onto for each word
 
-    for i in range(len(input_variable)):
-        # Run words through encoder
-        encoder_hidden = encoder.init_hidden()
-        encoder_cell = encoder.init_cell()
-        encoder_outputs, (encoder_hidden, encoder_cell) = encoder(Variable(input_variable[i]), (encoder_hidden, encoder_cell))
+    # Run words through encoder
+    encoder_hidden = encoder.init_hidden()
+    encoder_cell = encoder.init_cell()
+    encoder_outputs, (encoder_hidden, encoder_cell) = encoder(input_variable, (encoder_hidden, encoder_cell))
 
-        # Prepare input and output variables
-        decoder_input = Variable(torch.LongTensor([[SOS_token]]))
-        decoder_hidden = encoder_hidden # Use last hidden state from encoder to start decoder
-        decoder_cell = encoder_cell
-        if USE_CUDA:
-            decoder_input = decoder_input.cuda()
+    # Prepare input and output variables
+    decoder_input = Variable(torch.LongTensor([[SOS_token]]))
+    decoder_hidden = encoder_hidden # Use last hidden state from encoder to start decoder
+    decoder_cell = encoder_cell
+    if USE_CUDA:
+        decoder_input = decoder_input.cuda()
 
-        # TODO: don't require that output havve the same size as the input.
+    # TODO: don't require that output havve the same size as the input.
 
-        # Choose whether to use teacher forcing
-        use_teacher_forcing = random.random() < teacher_forcing_ratio
-        if use_teacher_forcing:
-            # Teacher forcing: Use the ground-truth target as the next input
-            for di in range(total_length):
-                decoder_output, (decoder_hidden, decoder_cell) = decoder(decoder_input, (decoder_hidden, decoder_cell))
-                loss += criterion(decoder_output, Variable(input_variable[i])[di])
-                decoder_input = Variable(input_variable[i])[di] # Next target is next input
+    # Choose whether to use teacher forcing
+    use_teacher_forcing = random.random() < teacher_forcing_ratio
+    if use_teacher_forcing:
+        # Teacher forcing: Use the ground-truth target as the next input
+        for di in range(total_length):
+            decoder_output, (decoder_hidden, decoder_cell) = decoder(decoder_input, (decoder_hidden, decoder_cell))
+            loss += criterion(decoder_output, input_variable[di])
+            decoder_input = input_variable[di] # Next target is next input
 
-        else:
-            # Without teacher forcing: use network's own prediction as the next input
-            for di in range(total_length):
-                decoder_output, (decoder_hidden, decoder_cell) = decoder(decoder_input, (decoder_hidden, decoder_cell))
-                loss += criterion(decoder_output, Variable(input_variable[i])[di])
-                # Get most likely word index (highest value) from output
-                topv, topi = decoder_output.data.topk(1)
-                ni = topi[0][0]
+    else:
+        # Without teacher forcing: use network's own prediction as the next input
+        for di in range(total_length):
+            decoder_output, (decoder_hidden, decoder_cell) = decoder(decoder_input, (decoder_hidden, decoder_cell))
+            loss += criterion(decoder_output, input_variable[di])
+            # Get most likely word index (highest value) from output
+            topv, topi = decoder_output.data.topk(1)
+            ni = topi[0][0]
 
-                decoder_input = Variable(torch.LongTensor([[ni]])) # Chosen word is next input
-                if USE_CUDA: decoder_input = decoder_input.cuda()
-                if ni == EOS_token: break
+            decoder_input = Variable(torch.LongTensor([[ni]])) # Chosen word is next input
+            if USE_CUDA: decoder_input = decoder_input.cuda()
+            if ni == EOS_token: break
 
     # Backpropagation
     loss.backward()
@@ -337,7 +336,7 @@ def train(input_variable, total_length, encoder, decoder, encoder_optimizer, dec
     encoder_optimizer.step()
     decoder_optimizer.step()
 
-    return loss.data[0] / (total_length * batch_size)
+    return loss.data[0] / total_length
 
 def as_minutes(s):
     m = math.floor(s / 60)
@@ -447,53 +446,50 @@ if to_train:
         for i in range(batch_size):
             input_variables.append(indexes_from_sentence(vocab, random.choice(data[bin_i])))
         input_variable = Variable(torch.LongTensor(input_variables).view(batch_size, -1, 1))'''
-        #input_variable = variable_from_datum(random.choice(data[bin_i]))
-        for batch_idx, data_batch in enumerate(train_dataloader):
-            #print(batch_idx)
-            if USE_CUDA:
-                data_batch = data_batch.cuda()
-            # Run the train function
-            loss = train(data_batch, total_length, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
-            # Keep track of loss
-            print_loss_total += loss
-            plot_loss_total += loss
-            if epoch == 1:
-                test_loss = []
-                for i in range(len(test_data[bin_i])):
-                    testing_input = test_data[bin_i][i]
-                    test_loss.append(test(testing_input, total_length, encoder, decoder))
-                prev_avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
-                all_avg_test_loss = [prev_avg_test_loss]
-            if epoch % print_every == 0:
-                test_loss = []
-                for i in range(len(test_data[bin_i])):
-                    testing_input = test_data[bin_i][i]
-                    test_loss.append(test(testing_input, total_length, encoder, decoder))
-                avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
-                print("Average test loss:")
-                print(avg_test_loss)
-                all_avg_test_loss.append(avg_test_loss)
-                print_loss_avg = print_loss_total / print_every
-                print_loss_total = 0
-                print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, print_loss_avg)
-                print(print_summary)
-                #if abs(prev_avg_test_loss - avg_test_loss) < convergence_value:
-                   #print("Average test losses:")
-                    #print(all_avg_test_loss)
-                    #break
-                prev_avg_test_loss = avg_test_loss
+        input_variable = variable_from_datum(random.choice(data[bin_i]))
+        # Run the train function
+        loss = train(input_variable, total_length, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
+        # Keep track of loss
+        print_loss_total += loss
+        plot_loss_total += loss
+        if epoch == 1:
+            test_loss = []
+            for i in range(len(test_data[bin_i])):
+                testing_input = test_data[bin_i][i]
+                test_loss.append(test(testing_input, total_length, encoder, decoder))
+            prev_avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
+            all_avg_test_loss = [prev_avg_test_loss]
+        if epoch % print_every == 0:
+            '''test_loss = []
+            for i in range(len(test_data[bin_i])):
+                testing_input = test_data[bin_i][i]
+                test_loss.append(test(testing_input, total_length, encoder, decoder))
+            avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
+            print("Average test loss:")
+            print(avg_test_loss)
+            all_avg_test_loss.append(avg_test_loss)
+            print_loss_avg = print_loss_total / print_every
+            print_loss_total = 0
+            print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, print_loss_avg)
+            print(print_summary)
+            #if abs(prev_avg_test_loss - avg_test_loss) < convergence_value:
+               #print("Average test losses:")
+                #print(all_avg_test_loss)
+                #break
+            prev_avg_test_loss = avg_test_loss
 
-                plot_loss_avg = plot_loss_total / print_every
-                plot_losses.append(plot_loss_avg)
-                plot_loss_total = 0
-                torch.save(encoder, 'encoder.pt')
-                torch.save(decoder, 'decoder.pt')
-            if epoch % 2000 == 0:
-                evaluate_randomly(bin_i)
-        print("Examined %d data" % (epoch * len(data[0])))
+            plot_loss_avg = plot_loss_total / print_every
+            plot_losses.append(plot_loss_avg)
+            plot_loss_total = 0'''
+            torch.save(encoder, 'single_encoder.pt')
+            torch.save(decoder, 'single_decoder.pt')
+        if epoch % 2000 == 0:
+            evaluate_randomly(bin_i)
+        if epoch % 16 == 0:
+            print("%d batchs" % (epoch/16))
 
-    torch.save(encoder, 'encoder.pt')
-    torch.save(decoder, 'decoder.pt')
+    torch.save(encoder, 'single_encoder.pt')
+    torch.save(decoder, 'single_decoder.pt')
 
     print(plot_losses)
     print(all_avg_test_loss)
