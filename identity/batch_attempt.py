@@ -226,6 +226,7 @@ class EncoderRNN(nn.Module):
     def forward(self, word_inputs, seq_lengths, hidden):
         # Note: we run this all at once (over the whole input sequence)
         embedded = self.embedding(word_inputs)
+        import pdb; pdb.set_trace()
         packed = rnn.pack_padded_sequence(embedded, seq_lengths)
         outputs, hidden = self.lstm(packed, hidden)
         outputs, output_lengths = torch.nn.utils.rnn.pad_packed_sequence(outputs, batch_first=False)
