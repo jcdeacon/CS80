@@ -30,12 +30,14 @@ MAX_LENGTH = 10
 
 test_size = 500
 
-batch_size = 16
+batch_size = 32
 
 convergence_value = 0.0001
 
+test_to_train = 0.1
+
 # True if in training, False if in evaluating.
-to_train = True
+to_train = False
 
 # Only relevant if to_train is true.
 # True if evaluating a random pair, False if sentence from user.
@@ -46,7 +48,7 @@ random_from_test = True
 # Configuring training
 n_epochs = 50
 plot_every = 50
-print_every = 100
+print_every = 1
 
 bins = [7, 12, 52, 102, 1002] # Everything is a normal number + 2 for SOS and EOS.
 
@@ -126,7 +128,7 @@ def prepare_data(vocab, datafile):
         vocab.index_words(datum)
 
     #ret_data = [[] for i in range(len(bins))]
-    ret_data = [[]] # In binned form so can bin later.
+    ret_data = [[],[[]]] # 0 is train, 1 is test: test is binned for possible future binning
 
     for i in range(len(bins)):
         if i == 0:
@@ -137,7 +139,10 @@ def prepare_data(vocab, datafile):
             #if lower_bound < len(datum) <= bins[i]:
                 #ret_data[i].append(datum)
             if len(datum) == 8:
-                ret_data[0].append(datum)
+                if random.random() < test_to_train:
+                    ret_data[1][0].append(datum)
+                else:
+                    ret_data[0].append(datum)
 
     num_sorted = 0
     for b in ret_data:
@@ -150,7 +155,7 @@ def prepare_data(vocab, datafile):
 vocab = Lang("Script Vocab")
 
 vocab, data = prepare_data(vocab, train_datafile)
-vocab, test_data = prepare_data(vocab, test_datafile)
+train_data, test_data = data
 
 print("Train bin 0 size")
 print(len(data[0]))
@@ -420,7 +425,7 @@ if to_train:
         decoder.cuda()
 
     # Initialize optimizers and criterion
-    learning_rate = 0.0001
+    learning_rate = 0.001
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
     criterion = nn.NLLLoss()
@@ -457,14 +462,14 @@ if to_train:
             # Keep track of loss
             print_loss_total += loss
             plot_loss_total += loss
-            if epoch == 1:
+            if epoch == 1 and batch_idx == 0:
                 test_loss = []
                 for i in range(len(test_data[bin_i])):
                     testing_input = test_data[bin_i][i]
                     test_loss.append(test(testing_input, total_length, encoder, decoder))
                 prev_avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
                 all_avg_test_loss = [prev_avg_test_loss]
-            if epoch % print_every == 0:
+            if batch_idx == 1:
                 test_loss = []
                 for i in range(len(test_data[bin_i])):
                     testing_input = test_data[bin_i][i]
