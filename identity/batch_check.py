@@ -5,6 +5,8 @@ import random
 import time
 import math
 
+import pickle
+
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -37,7 +39,7 @@ convergence_value = 0.0001
 test_to_train = 0.1
 
 # True if in training, False if in evaluating.
-to_train = False
+to_train = True
 
 # Only relevant if to_train is true.
 # True if evaluating a random pair, False if sentence from user.
@@ -46,7 +48,7 @@ random_datum = True
 random_from_test = True
 
 # Configuring training
-n_epochs = 50
+n_epochs = 500
 plot_every = 50
 print_every = 1
 
@@ -154,8 +156,14 @@ def prepare_data(vocab, datafile):
 
 vocab = Lang("Script Vocab")
 
+with open('testset.pkl', 'rb') as f:
+    test_data = pickle.load(f)
+
+with open('trainset.pkl', 'rb') as f:
+    train_data = pickle.load(f)
+
 vocab, data = prepare_data(vocab, train_datafile)
-train_data, test_data = data
+#train_data, test_data = data
 
 print("Train bin 0 size")
 print(len(data[0]))
