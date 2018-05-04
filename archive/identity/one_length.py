@@ -44,7 +44,7 @@ to_train = False
 
 # Only relevant if to_train is true.
 # True if evaluating a random pair, False if sentence from user.
-random_datum = True
+random_datum = False
 
 random_from_test = True
 
