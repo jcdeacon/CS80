@@ -39,7 +39,7 @@ convergence_value = 0.0001
 test_to_train = 0.1
 
 # True if in training, False if in evaluating.
-to_train = True
+to_train = False
 
 # Only relevant if to_train is true.
 # True if evaluating a random pair, False if sentence from user.
@@ -391,7 +391,7 @@ def evaluate(sentence, total_length):
 
         # Choose top word from output
         topv, topi = decoder_output.data.topk(1)
-        ni = topi[0][0]
+        ni = int(topi[0][0])
         decoded_words.append(vocab.index2word[ni])
 
         # Next input is chosen word

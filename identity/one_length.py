@@ -40,7 +40,7 @@ convergence_value = 0.0001
 test_to_train = 0.1
 
 # True if in training, False if in evaluating.
-to_train = True
+to_train = False
 
 # Only relevant if to_train is true.
 # True if evaluating a random pair, False if sentence from user.
@@ -49,7 +49,7 @@ random_datum = True
 random_from_test = True
 
 # Configuring training
-n_epochs = 500
+n_epochs = 1000
 plot_every = 50
 print_every = 1
 
@@ -219,7 +219,7 @@ class EncoderRNN(nn.Module):
 
         h = Variable(torch.zeros(self.n_layers, batch_size, self.hidden_size))
         c = Variable(torch.zeros(self.n_layers, batch_size, self.hidden_size))
- 
+
         if sentences.is_cuda:
             h, c = h.cuda(), c.cuda()
 
@@ -250,7 +250,7 @@ class DecoderRNN(nn.Module):
         output = self.embedding(input).squeeze(1)
         output, hidden = self.lstm(output.unsqueeze(0), hidden)
         output = self.softmax(self.out(output[0]))
-        
+
         return output, hidden
 
 def test(sentence, total_length, encoder, decoder, max_length = MAX_LENGTH):
@@ -317,7 +317,7 @@ def train(input_variable, total_length, encoder, decoder, encoder_optimizer, dec
 
     for di in range(total_length):
         decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-        loss += criterion(decoder_output, input_variable[:,di]) 
+        loss += criterion(decoder_output, input_variable[:,di])
 
         if use_teacher_forcing:
             # Teacher forcing: Use the ground-truth target as the next input
@@ -355,21 +355,18 @@ def time_since(since, percent):
     return '%s (- %s)' % (as_minutes(s), as_minutes(rs))
 
 def evaluate(sentence, total_length):
-    input_variable = variable_from_sentence(vocab, sentence)
-    input_length = input_variable.size()[0]
+    input_variable = variable_from_sentence(vocab, sentence).transpose(0, 1)
+    print("input variable length %d" % input_variable.size(0))
+    input_length = input_variable.size()[1]
 
-    # Run through encoder
-    encoder_hidden = encoder.init_hidden()
-    encoder_cell = encoder.init_cell()
-    encoder_outputs, (encoder_hidden, encoder_cell) = encoder(input_variable, (encoder_hidden, encoder_cell))
+    # get hidden states from encoder
+    encoder_outputs, encoder_hidden = encoder(input_variable)
 
-    # Create starting vectors for decoder
-    decoder_input = Variable(torch.LongTensor([[SOS_token]])) # SOS
+    # Prepare input and output variables
+    decoder_input = Variable(torch.LongTensor([[SOS_token]]))
+    decoder_hidden = encoder_hidden # Use last hidden state from encoder to start decoder
     if USE_CUDA:
         decoder_input = decoder_input.cuda()
-
-    decoder_hidden = encoder_hidden
-    decoder_cell = encoder_cell
 
     decoded_words = []
 
@@ -377,11 +374,11 @@ def evaluate(sentence, total_length):
 
     # Run through decoder
     for di in range(input_length):
-        decoder_output, (decoder_hidden, decoder_cell) = decoder(decoder_input, (decoder_hidden, decoder_cell))
+        decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
 
         # Choose top word from output
         topv, topi = decoder_output.data.topk(1)
-        ni = topi[0][0]
+        ni = int(topi[0][0])
         decoded_words.append(vocab.index2word[ni])
 
         # Next input is chosen word
@@ -467,7 +464,7 @@ if to_train:
                     testing_input = test_data[bin_i][i]
                     test_loss.append(test(testing_input, total_length, encoder, decoder))
                 prev_avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
-                all_avg_test_loss = [prev_avg_test_loss]
+                all_avg_test_loss = [int(prev_avg_test_loss)]
             if batch_idx == 1:
                 test_loss = []
                 for i in range(len(test_data[bin_i])):
@@ -476,7 +473,7 @@ if to_train:
                 avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
                 print("Average test loss:")
                 print(avg_test_loss)
-                all_avg_test_loss.append(avg_test_loss)
+                all_avg_test_loss.append(float(avg_test_loss))
                 print_loss_avg = print_loss_total / print_every
                 print_loss_total = 0
                 print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, print_loss_avg)
@@ -488,7 +485,7 @@ if to_train:
                 prev_avg_test_loss = avg_test_loss
 
                 plot_loss_avg = plot_loss_total / print_every
-                plot_losses.append(plot_loss_avg)
+                plot_losses.append(float(plot_loss_avg))
                 plot_loss_total = 0
                 torch.save(encoder, 'encoder.pt')
                 torch.save(decoder, 'decoder.pt')
