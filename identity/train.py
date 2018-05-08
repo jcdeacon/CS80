@@ -1,26 +1,23 @@
-import unicodedata
-import string
-import re
-import random
 import time
 import math
-
-import pickle
+import datetime
 
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torch import optim
-import torch.nn.functional as F
 
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-import numpy as np
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
+from model import *
+from data import *
+from evaluate import *
 
-def test(sentence, total_length, encoder, decoder, max_length = MAX_LENGTH):
-    input_variable = variable_from_sentence(vocab, sentence).transpose(0,1)
+batch_size = 32
+
+n_epochs = 1
+
+vocab, (train_dataloader, test_dataloader), test_data  = prepare_dataloaders(batch_size)
+
+def test(input_variable, total_length, encoder, decoder):
     input_length = input_variable.size(1)
 
     # Run through encoder
@@ -76,7 +73,7 @@ def train(input_variable, total_length, encoder, decoder, encoder_optimizer, dec
     if USE_CUDA:
         decoder_input = decoder_input.cuda()
 
-    # TODO: don't require that output havve the same size as the input.
+    # TODO: don't require that output have the same size as the input.
 
     # Choose whether to use teacher forcing
     use_teacher_forcing = random.random() < teacher_forcing_ratio
@@ -94,19 +91,14 @@ def train(input_variable, total_length, encoder, decoder, encoder_optimizer, dec
             topv, topi = decoder_output.data.topk(1)
             decoder_input = topi
 
-            # ezhan: you don't want to terminate sentence early during training,
-            # otherwise the model might learn that the best way to decrease loss is to output EOS asap
-            # if ni == EOS_token:
-            #     break
-
     # Backpropagation
     loss.backward()
-    torch.nn.utils.clip_grad_norm(encoder.parameters(), clip)
-    torch.nn.utils.clip_grad_norm(decoder.parameters(), clip)
+    torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+    torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
     encoder_optimizer.step()
     decoder_optimizer.step()
 
-    return loss.data[0] / (total_length * batch_size)
+    return float(loss) / total_length
 
 def as_minutes(s):
     m = math.floor(s / 60)
@@ -120,107 +112,68 @@ def time_since(since, percent):
     rs = es - s
     return '%s (- %s)' % (as_minutes(s), as_minutes(rs))
 
-def show_plot(points):
-    plt.figure()
-    fig, ax = plt.subplots()
-    loc = ticker.MultipleLocator(base=0.2) # put ticks at regular intervals
-    ax.yaxis.set_major_locator(loc)
-    plt.plot(points)
+if __name__ == '__main__':
+    embedding_size = 10
+    hidden_size = 10
+    n_layers = 2
 
-embedding_size = 10
-hidden_size = 10
-n_layers = 2
+    # Initialize models
+    encoder = EncoderRNN(vocab.n_words, embedding_size, hidden_size, n_layers)
+    decoder = DecoderRNN(vocab.n_words, embedding_size, hidden_size, n_layers)
 
-# Initialize models
-encoder = EncoderRNN(vocab.n_words, embedding_size, hidden_size, n_layers)
-decoder = DecoderRNN(vocab.n_words, embedding_size, hidden_size, n_layers)
+    # Move models to GPU
+    if USE_CUDA:
+        encoder.cuda()
+        decoder.cuda()
 
-# Move models to GPU
-if USE_CUDA:
-    encoder.cuda()
-    decoder.cuda()
+    # Initialize optimizers and criterion
+    learning_rate = 0.001
+    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
+    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
+    criterion = nn.NLLLoss()
 
-# Initialize optimizers and criterion
-learning_rate = 0.001
-encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
-decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
-criterion = nn.NLLLoss()
+    # Keep track of time elapsed and running averages
+    start = time.time()
+    train_losses = []
+    test_losses = []
 
-# Keep track of time elapsed and running averages
-start = time.time()
-plot_losses = []
-print_loss_total = 0 # Reset every print_every
-plot_loss_total = 0 # Reset every plot_every
+    total_length = 8
+    # Begin!
+    for epoch in range(1, n_epochs+1):
+        # Get training data for this cycle
+        for batch_idx, data_batch in enumerate(train_dataloader):
+            if USE_CUDA:
+                data_batch = data_batch.cuda()
 
-# TODO: implement abilities for more bins.
+            # Run the train function
+            loss = train(data_batch, total_length, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
+            # Keep track of loss
+            if batch_idx == 0:
+                test_loss = []
+                for bid, testing_input in enumerate(test_dataloader):
+                    if USE_CUDA:
+                        testing_input = testing_input.cuda()
+                    test_loss.append(test(testing_input, total_length, encoder, decoder))
+                avg_test_loss = (sum(test_loss)/len(test_loss)).item()
+                print("Average test loss: %d", avg_test_loss)
+                test_losses.append(avg_test_loss)
+                print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, loss)
+                print(print_summary)
+                train_losses.append(loss)
+                plot_loss_total = 0
+                torch.save(encoder, '../models/encoder-partial.pt')
+                torch.save(decoder, '../models/decoder-partial.pt')
 
-bin_i = 0
+    torch.save(encoder, '../models/encoder.pt')
+    torch.save(decoder, '../models/decoder.pt')
 
-#total_length = bins[bin_i]
+    now = datetime.datetime.now().strftime("_%B-%d-%Y_%H:%M")
+    ep = str(n_epochs)
+    torch.save(encoder, '../models/encoder_' + ep + now + '.pt')
+    torch.save(decoder, '../models/decoder_' + ep + now + '.pt')
 
-total_length = 8
-# Begin!
-for epoch in range(1, n_epochs+1):
-    if epoch % 500 == 0:
-        print("On epoch %d" % epoch)
-    # Get training data for this cycle
-    '''input_variables = []
-    for i in range(batch_size):
-        input_variables.append(indexes_from_sentence(vocab, random.choice(data[bin_i])))
-    input_variable = Variable(torch.LongTensor(input_variables).view(batch_size, -1, 1))'''
-    #input_variable = variable_from_datum(random.choice(data[bin_i]))
-    for batch_idx, data_batch in enumerate(train_dataloader):
-        #print(batch_idx)
-        if USE_CUDA:
-            data_batch = data_batch.cuda()
+    print(train_losses)
+    print(test_losses)
 
-        # Run the train function
-        loss = train(data_batch, total_length, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
-        # Keep track of loss
-        print_loss_total += loss
-        plot_loss_total += loss
-        if epoch == 1 and batch_idx == 0:
-            test_loss = []
-            for i in range(len(test_data[bin_i])):
-                testing_input = test_data[bin_i][i]
-                test_loss.append(test(testing_input, total_length, encoder, decoder))
-            prev_avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
-            all_avg_test_loss = [int(prev_avg_test_loss)]
-        if batch_idx == 1:
-            test_loss = []
-            for i in range(len(test_data[bin_i])):
-                testing_input = test_data[bin_i][i]
-                test_loss.append(test(testing_input, total_length, encoder, decoder))
-            avg_test_loss = (sum(test_loss)/len(test_loss)).data[0]
-            print("Average test loss:")
-            print(avg_test_loss)
-            all_avg_test_loss.append(float(avg_test_loss))
-            print_loss_avg = print_loss_total / print_every
-            print_loss_total = 0
-            print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, print_loss_avg)
-            print(print_summary)
-            #if abs(prev_avg_test_loss - avg_test_loss) < convergence_value:
-               #print("Average test losses:")
-                #print(all_avg_test_loss)
-                #break
-            prev_avg_test_loss = avg_test_loss
-
-            plot_loss_avg = plot_loss_total / print_every
-            plot_losses.append(float(plot_loss_avg))
-            plot_loss_total = 0
-            torch.save(encoder, 'encoder.pt')
-            torch.save(decoder, 'decoder.pt')
-        if epoch % 2000 == 0:
-            evaluate_randomly(bin_i)
-    print("Examined %d data" % (epoch * len(data[0])))
-
-torch.save(encoder, 'encoder.pt')
-torch.save(decoder, 'decoder.pt')
-
-print(plot_losses)
-print(all_avg_test_loss)
-
-show_plot(plot_losses)
-
-evaluate_randomly(bin_i)
+    evaluate_randomly(test_data, encoder, decoder, vocab)
 

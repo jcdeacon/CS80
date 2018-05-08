@@ -5,26 +5,25 @@ import pickle
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-
-USE_CUDA = True
+from torch.autograd import Variable
 
 SOS_token = 0
 EOS_token = 1
 
 train_datafile = "../data/simple.txt"
 
-MAX_LENGTH = 10
-
-batch_size = 32
-
 test_to_train = 0.1
+
+USE_CUDA = True
+
+MAX_LENGTH = 10
 
 class Lang:
     def __init__(self, name):
         self.name = name
-        self.word2index = {}
-        self.word2count = {}
-        self.index2word = {0: "SOS", 1: "EOS"}
+        self.word2index = {"SOS": SOS_token, "EOS": EOS_token}
+        self.word2count = {"SOS": 0, "EOS": 0}
+        self.index2word = {SOS_token: "SOS", EOS_token: "EOS"}
         self.n_words = 2 # Count SOS and EOS
 
     def index_words(self, sentence):
@@ -39,8 +38,6 @@ class Lang:
             self.n_words += 1
         else:
             self.word2count[word] += 1
-
-vocab = Lang("Script Vocab")
 
 class LineDataset(Dataset):
     def __init__(self, datalist):
@@ -78,6 +75,9 @@ def read_sentences(datafile):
     return data
 
 def prepare_data(datafile):
+
+    vocab = Lang("Script Data")
+
     data = read_sentences(datafile)
     print("Read %s sentences." % len(data))
 
@@ -101,45 +101,51 @@ def prepare_data(datafile):
     with open('../data/testset.pkl', 'wb') as f:
         pickle.dump(ret_data[1], f)
 
-    return ret_data
+    with open('../data/vocab.pkl', 'wb') as f:
+        pickle.dump(vocab, f)
+
+    return vocab, ret_data
 
 def read_data():
-    with open('testset.pkl', 'rb') as f:
+    with open('../data/trainset.pkl', 'rb') as f:
+        train_data = pickle.load(f)
+
+    with open('../data/testset.pkl', 'rb') as f:
         test_data = pickle.load(f)
 
-    with open('trainset.pkl', 'rb') as f:
-        train_data = pickle.load(f)
+    with open('../data/vocab.pkl', 'rb') as f:
+        vocab = pickle.load(f)
 
     print("Trainset size: %d" % len(train_data))
     print("Testset size: %d" % len(test_data))
 
-    return(train_data, test_data)
+    return vocab, (train_data, test_data)
 
 # Return a list of indexes, one for each word in the sentence
 def indexes_from_sentence(vocab, sentence):
     return [vocab.word2index[word] for word in sentence]
-
-def ready_for_dataset(datalist):
-    ret = []
-    for i in range(len(datalist)):
-        ret.append(indexes_from_sentence(vocab, datalist[i]))
-    return ret
-
-def prepare_dataloaders():
-    data = read_data()
-
-    train_dataset = LineDataset(ready_for_dataset(data[0]))
-    train_dataloader = DataLoader(train_dataset, batch_size = batch_size, shuffle=True, num_workers = 8)
-    test_dataset = LineDataset(ready_for_dataset(data[1]))
-    test_dataloader = DataLoader(test_dataset, batch_size = batch_size, shuffle=True, num_workers = 8)
-
-    return (train_dataloader, test_dataloader)
 
 def variable_from_sentence(vocab, sentence):
     indexes = indexes_from_sentence(vocab, sentence)
     var = Variable(torch.LongTensor(indexes).view(-1, 1))
     if USE_CUDA: var = var.cuda()
     return var
+
+def ready_for_dataset(vocab, datalist):
+    ret = []
+    for i in range(len(datalist)):
+        ret.append(indexes_from_sentence(vocab, datalist[i]))
+    return ret
+
+def prepare_dataloaders(batch_size):
+    vocab, data = read_data()
+
+    train_dataset = LineDataset(ready_for_dataset(vocab, data[0]))
+    train_dataloader = DataLoader(train_dataset, batch_size = batch_size, shuffle=True, num_workers = 8)
+    test_dataset = LineDataset(ready_for_dataset(vocab, data[1]))
+    test_dataloader = DataLoader(test_dataset, batch_size = 1, shuffle=True, num_workers = 8)
+
+    return vocab, (train_dataloader, test_dataloader), data[1]
 
 if __name__ == '__main__':
     prepare_data(train_datafile)
