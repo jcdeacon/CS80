@@ -47,7 +47,6 @@ class DecoderRNN(nn.Module):
         self.lstm = nn.LSTM(embedding_size, hidden_size, n_layers)
         self.out = nn.Linear(hidden_size, vocab_size)
         self.softmax = nn.LogSoftmax(dim=1)
-        self.lstm.flatten_parameters()
 
     def forward(self, input, hidden):
         #self.lstm.flatten_parameters() TODO: figure out where to put this so it
