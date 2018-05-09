@@ -9,6 +9,7 @@ from torch.autograd import Variable
 
 SOS_token = 0
 EOS_token = 1
+PAD_token = 2
 
 train_datafile = "../data/simple.txt"
 
@@ -16,14 +17,14 @@ test_to_train = 0.1
 
 USE_CUDA = True
 
-MAX_LENGTH = 10
+MAX_LENGTH = 256
 
 class Lang:
     def __init__(self, name):
         self.name = name
-        self.word2index = {"SOS": SOS_token, "EOS": EOS_token}
-        self.word2count = {"SOS": 0, "EOS": 0}
-        self.index2word = {SOS_token: "SOS", EOS_token: "EOS"}
+        self.word2index = {"SOS": SOS_token, "EOS": EOS_token, "PAD": PAD_token}
+        self.word2count = {"SOS": 0, "EOS": 0, "PAD": 0}
+        self.index2word = {SOS_token: "SOS", EOS_token: "EOS", PAD_token: "PAD"}
         self.n_words = 2 # Count SOS and EOS
 
     def index_words(self, sentence):
@@ -41,7 +42,7 @@ class Lang:
 
 class LineDataset(Dataset):
     def __init__(self, datalist):
-        self.datalist = torch.LongTensor(datalist)
+        self.datalist = datalist
 
     def __len__(self):
         return len(self.datalist)
@@ -83,15 +84,19 @@ def prepare_data(datafile):
 
     ret_data = ([],[]) # 0 is train, 1 is test
 
+    max_length = 0
+
     print("Indexing words...")
     for datum in data:
         vocab.index_words(datum)
-        # TODO: Remove the if when padding is implemented.
-        if len(datum) == 8:
-            if random.random() < test_to_train:
-                ret_data[1].append(datum)
-            else:
-                ret_data[0].append(datum)
+        if len(datum) > max_length:
+            max_length = len(datum)
+        if random.random() < test_to_train:
+            ret_data[1].append(datum)
+        else:
+            ret_data[0].append(datum)
+
+    print("The largest length is %d." % max_length)
 
     print("Saving datasets...")
 
@@ -134,16 +139,68 @@ def variable_from_sentence(vocab, sentence):
 def ready_for_dataset(vocab, datalist):
     ret = []
     for i in range(len(datalist)):
-        ret.append(indexes_from_sentence(vocab, datalist[i]))
+        ret.append(torch.LongTensor(indexes_from_sentence(vocab, datalist[i])))
     return ret
+
+def pad_tensor(vec, pad, dim):
+    """
+    args:
+        vec - tensor to pad
+        pad - the size to pad to
+        dim - dimension to pad
+
+    return:
+        a new tensor padded to 'pad' in dimension 'dim'
+    """
+    pad_size = list(vec.shape)
+    pad_size[dim] = pad - vec.size(dim)
+    pads = [PAD_token for i in range(pad_size[dim])]
+    return torch.cat([vec, torch.LongTensor(pads)], dim=dim)
+
+
+class PadCollate:
+    """
+    a variant of callate_fn that pads according to the longest sequence in
+    a batch of sequences
+    """
+
+    def __init__(self, dim=0):
+        """
+        args:
+            dim - the dimension to be padded (dimension of time in sequences)
+        """
+        self.dim = dim
+
+    def pad_collate(self, batch):
+        """
+        args:
+            batch - list of (tensor, label)
+
+        reutrn:
+            xs - a tensor of all examples in 'batch' after padding
+            ys - a LongTensor of all labels in batch
+        """
+        # find longest sequence
+        max_len = max(map(lambda x: x.shape[self.dim], batch))
+        # pad according to max_len
+        batch = map(lambda x: (pad_tensor(x, pad=max_len, dim=self.dim), x.shape[self.dim]), batch)
+        # stack all
+        xs = torch.stack(list(map(lambda x: x[0], batch)), dim=0)
+        ys = torch.LongTensor(list(map(lambda x: x[1], batch)))
+        return xs
+
+    def __call__(self, batch):
+        return self.pad_collate(batch)
 
 def prepare_dataloaders(batch_size):
     vocab, data = read_data()
 
     train_dataset = LineDataset(ready_for_dataset(vocab, data[0]))
-    train_dataloader = DataLoader(train_dataset, batch_size = batch_size, shuffle=True, num_workers = 8)
+    train_dataloader = DataLoader(train_dataset, batch_size = batch_size, shuffle=True, num_workers = 8,
+	collate_fn = PadCollate(dim=0))
     test_dataset = LineDataset(ready_for_dataset(vocab, data[1]))
-    test_dataloader = DataLoader(test_dataset, batch_size = 1, shuffle=True, num_workers = 8)
+    test_dataloader = DataLoader(test_dataset, batch_size = 1, shuffle=True, num_workers = 8,
+        collate_fn = PadCollate(dim=0))
 
     return vocab, (train_dataloader, test_dataloader), data[1]
 

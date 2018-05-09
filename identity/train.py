@@ -13,7 +13,7 @@ from evaluate import *
 
 batch_size = 32
 
-n_epochs = 1
+n_epochs = 10
 
 vocab, (train_dataloader, test_dataloader), test_data  = prepare_dataloaders(batch_size)
 
@@ -32,22 +32,29 @@ def test(input_variable, total_length, encoder, decoder):
 
     loss = 0 # Added onto for each word
 
-    # TODO: allow for different lengths
+    print('a')
 
     # Run through decoder
-    for di in range(input_length):
+    for di in range(MAX_LENGTH):
         #import pdb; pdb.set_trace()
         decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+
+        if (di >= input_length):
+            real_value = torch.LongTensor([PAD_token for _ in range(len(input_variable))])
+            if USE_CUDA:
+                real_value = real_value.cuda()
+        else:
+            real_value = input_variable[:,di]
 
         # Choose top word from output
         topv, topi = decoder_output.data.topk(1)
         ni = topi[0][0]
-        loss += criterion(decoder_output, input_variable[:,di])
+        loss += criterion(decoder_output, real_value)
 
         # Next input is chosen word
         decoder_input = Variable(torch.LongTensor([[ni]]))
         if USE_CUDA: decoder_input = decoder_input.cuda()
-    return loss/input_length
+    return loss / MAX_LENGTH
 
 # Train!
 
@@ -58,11 +65,12 @@ def test(input_variable, total_length, encoder, decoder):
 teacher_forcing_ratio = 0.5
 clip = 5.0
 
-def train(input_variable, total_length, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
+def train(input_variable, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
     # Zero gradients of both optimizers
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
     loss = 0 # Added onto for each word
+    input_length = input_variable.size(1)
 
     # get hidden states from encoder
     encoder_outputs, encoder_hidden = encoder(input_variable)
@@ -73,18 +81,22 @@ def train(input_variable, total_length, encoder, decoder, encoder_optimizer, dec
     if USE_CUDA:
         decoder_input = decoder_input.cuda()
 
-    # TODO: don't require that output have the same size as the input.
-
     # Choose whether to use teacher forcing
     use_teacher_forcing = random.random() < teacher_forcing_ratio
 
-    for di in range(total_length):
+    for di in range(MAX_LENGTH):
         decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-        loss += criterion(decoder_output, input_variable[:,di])
+        if (di >= input_length):
+            real_value = torch.LongTensor([PAD_token for _ in range(len(input_variable))])
+            if USE_CUDA:
+                real_value = real_value.cuda()
+        else:
+            real_value = input_variable[:,di]
+        loss += criterion(decoder_output, real_value)
 
         if use_teacher_forcing:
             # Teacher forcing: Use the ground-truth target as the next input
-            decoder_input = Variable(input_variable[:,di]) # Next target is next input
+            decoder_input = Variable(real_value) # Next target is next input
         else:
             # Without teacher forcing: use network's own prediction as the next input
             # Get most likely word index (highest value) from output
@@ -98,7 +110,7 @@ def train(input_variable, total_length, encoder, decoder, encoder_optimizer, dec
     encoder_optimizer.step()
     decoder_optimizer.step()
 
-    return float(loss) / total_length
+    return float(loss) / MAX_LENGTH
 
 def as_minutes(s):
     m = math.floor(s / 60)
@@ -137,7 +149,6 @@ if __name__ == '__main__':
     train_losses = []
     test_losses = []
 
-    total_length = 8
     # Begin!
     for epoch in range(1, n_epochs+1):
         # Get training data for this cycle
@@ -146,16 +157,15 @@ if __name__ == '__main__':
                 data_batch = data_batch.cuda()
 
             # Run the train function
-            loss = train(data_batch, total_length, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
+            loss = train(data_batch, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
             # Keep track of loss
-            if batch_idx == 0:
+            if batch_idx == 0 & epoch % 10 == 0:
                 test_loss = []
                 for bid, testing_input in enumerate(test_dataloader):
                     if USE_CUDA:
                         testing_input = testing_input.cuda()
-                    test_loss.append(test(testing_input, total_length, encoder, decoder))
+                    test_loss.append(test(testing_input, MAX_LENGTH, encoder, decoder))
                 avg_test_loss = (sum(test_loss)/len(test_loss)).item()
-                print("Average test loss: %d", avg_test_loss)
                 test_losses.append(avg_test_loss)
                 print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, loss)
                 print(print_summary)
@@ -172,7 +182,9 @@ if __name__ == '__main__':
     torch.save(encoder, '../models/encoder_' + ep + now + '.pt')
     torch.save(decoder, '../models/decoder_' + ep + now + '.pt')
 
+    print("Training loss:")
     print(train_losses)
+    print("Testing loss:")
     print(test_losses)
 
     evaluate_randomly(test_data, encoder, decoder, vocab)
