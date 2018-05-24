@@ -11,13 +11,13 @@ SOS_token = 0
 EOS_token = 1
 PAD_token = 2
 
-train_datafile = "../data/simple.txt"
+train_datafile = "../data/full.txt"
 
 test_to_train = 0.1
 
 USE_CUDA = True
 
-MAX_LENGTH = 256
+MAX_LENGTH = 20
 
 class Lang:
     def __init__(self, name):
@@ -84,19 +84,25 @@ def prepare_data(datafile):
 
     ret_data = ([],[]) # 0 is train, 1 is test
 
-    max_length = 0
+    num_dropped = 0
+    num_included = 0
 
     print("Indexing words...")
     for datum in data:
         vocab.index_words(datum)
-        if len(datum) > max_length:
-            max_length = len(datum)
-        if random.random() < test_to_train:
-            ret_data[1].append(datum)
+        if len(datum) <= MAX_LENGTH:
+            num_included += 1
+            if random.random() < test_to_train:
+                ret_data[1].append(datum)
+            else:
+                ret_data[0].append(datum)
         else:
-            ret_data[0].append(datum)
+            num_dropped += 1
 
-    print("The largest length is %d." % max_length)
+
+    print("The number dropped is %d." % num_dropped)
+    percent = 100 * num_dropped / (num_included + num_dropped)
+    print("The percent dropped is %f." % percent)
 
     print("Saving datasets...")
 
@@ -199,7 +205,7 @@ def prepare_dataloaders(batch_size):
     train_dataloader = DataLoader(train_dataset, batch_size = batch_size, shuffle=True, num_workers = 8,
 	collate_fn = PadCollate(dim=0))
     test_dataset = LineDataset(ready_for_dataset(vocab, data[1]))
-    test_dataloader = DataLoader(test_dataset, batch_size = 1, shuffle=True, num_workers = 8,
+    test_dataloader = DataLoader(test_dataset, batch_size = batch_size, shuffle=True, num_workers = 8,
         collate_fn = PadCollate(dim=0))
 
     return vocab, (train_dataloader, test_dataloader), data[1]

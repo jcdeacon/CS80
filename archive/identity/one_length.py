@@ -27,7 +27,6 @@ EOS_token = 1
 PAD_token = 2
 
 train_datafile = "simple.txt"
-test_datafile = "half_test_1000.txt" # currently part of training!!!
 
 MAX_LENGTH = 10
 
@@ -40,7 +39,7 @@ convergence_value = 0.0001
 test_to_train = 0.1
 
 # True if in training, False if in evaluating.
-to_train = False
+to_train = True
 
 # Only relevant if to_train is true.
 # True if evaluating a random pair, False if sentence from user.
@@ -162,6 +161,10 @@ with open('testset.pkl', 'rb') as f:
 
 with open('trainset.pkl', 'rb') as f:
     train_data = pickle.load(f)
+
+for item in test_data[0]:
+    if item in train_data:
+        print(item)
 
 vocab, data = prepare_data(vocab, train_datafile)
 #train_data, test_data = data

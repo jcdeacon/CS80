@@ -39,7 +39,7 @@ convergence_value = 0.0001
 test_to_train = 0.1
 
 # True if in training, False if in evaluating.
-to_train = False
+to_train = True
 
 # Only relevant if to_train is true.
 # True if evaluating a random pair, False if sentence from user.

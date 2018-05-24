@@ -13,48 +13,9 @@ from evaluate import *
 
 batch_size = 32
 
-n_epochs = 10
+n_epochs = 15
 
 vocab, (train_dataloader, test_dataloader), test_data  = prepare_dataloaders(batch_size)
-
-def test(input_variable, total_length, encoder, decoder):
-    input_length = input_variable.size(1)
-
-    # Run through encoder
-    encoder_outputs, encoder_hidden = encoder(input_variable)
-
-    # Create starting vectors for decoder
-    decoder_input = Variable(torch.LongTensor([[SOS_token]])) # SOS
-    if USE_CUDA:
-        decoder_input = decoder_input.cuda()
-
-    decoder_hidden = encoder_hidden
-
-    loss = 0 # Added onto for each word
-
-    print('a')
-
-    # Run through decoder
-    for di in range(MAX_LENGTH):
-        #import pdb; pdb.set_trace()
-        decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
-
-        if (di >= input_length):
-            real_value = torch.LongTensor([PAD_token for _ in range(len(input_variable))])
-            if USE_CUDA:
-                real_value = real_value.cuda()
-        else:
-            real_value = input_variable[:,di]
-
-        # Choose top word from output
-        topv, topi = decoder_output.data.topk(1)
-        ni = topi[0][0]
-        loss += criterion(decoder_output, real_value)
-
-        # Next input is chosen word
-        decoder_input = Variable(torch.LongTensor([[ni]]))
-        if USE_CUDA: decoder_input = decoder_input.cuda()
-    return loss / MAX_LENGTH
 
 # Train!
 
@@ -62,10 +23,10 @@ def test(input_variable, total_length, encoder, decoder):
 ######################################################################
 ######################################################################
 
-teacher_forcing_ratio = 0.5
+teacher_forcing_ratio = 0.25
 clip = 5.0
 
-def train(input_variable, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
+def run(input_variable, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, train):
     # Zero gradients of both optimizers
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
@@ -83,6 +44,9 @@ def train(input_variable, encoder, decoder, encoder_optimizer, decoder_optimizer
 
     # Choose whether to use teacher forcing
     use_teacher_forcing = random.random() < teacher_forcing_ratio
+
+    if not train:
+        use_teacher_forcing = False
 
     for di in range(MAX_LENGTH):
         decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
@@ -104,7 +68,8 @@ def train(input_variable, encoder, decoder, encoder_optimizer, decoder_optimizer
             decoder_input = topi
 
     # Backpropagation
-    loss.backward()
+    if train:
+        loss.backward()
     torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
     torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
     encoder_optimizer.step()
@@ -125,8 +90,8 @@ def time_since(since, percent):
     return '%s (- %s)' % (as_minutes(s), as_minutes(rs))
 
 if __name__ == '__main__':
-    embedding_size = 10
-    hidden_size = 10
+    embedding_size = 100
+    hidden_size = 200
     n_layers = 2
 
     # Initialize models
@@ -157,17 +122,17 @@ if __name__ == '__main__':
                 data_batch = data_batch.cuda()
 
             # Run the train function
-            loss = train(data_batch, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
+            loss = run(data_batch, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, True)
             # Keep track of loss
-            if batch_idx == 0 & epoch % 10 == 0:
+            if batch_idx == 0 and epoch % 1 == 0:
                 test_loss = []
                 for bid, testing_input in enumerate(test_dataloader):
                     if USE_CUDA:
                         testing_input = testing_input.cuda()
-                    test_loss.append(test(testing_input, MAX_LENGTH, encoder, decoder))
-                avg_test_loss = (sum(test_loss)/len(test_loss)).item()
+                    test_loss.append(run(testing_input, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, False))
+                avg_test_loss = sum(test_loss)/len(test_loss)
                 test_losses.append(avg_test_loss)
-                print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, loss)
+                print_summary = '%s (%d %d%%) train: %.4f test: %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, loss, avg_test_loss)
                 print(print_summary)
                 train_losses.append(loss)
                 plot_loss_total = 0
